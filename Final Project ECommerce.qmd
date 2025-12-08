@@ -1,0 +1,260 @@
+---
+title: "ADS506 Final Project: ECommerce Analysis"
+author: "Stephanie Smith"
+format: pdf
+editor: visual
+---
+
+## ADS-506 Final Project
+
+This file contains analysis on the E-Commerce retail segment.
+
+```{r}
+#load libraries
+library(readxl)
+library(tsibble)
+library(dplyr)
+library(ggplot2)
+library(fpp3)
+library(tidyverse)
+library(gt)
+```
+
+### Exploratory Data Analysis
+
+```{r}
+#load data
+ecommerce <- read_csv("C:/Users/stjsm/OneDrive/Desktop/ADS-506/Final Project/Data/MRTSSM4541USS.csv") |>
+  mutate(date = yearmonth(date)) |> 
+  select(date, value) |>
+  as_tsibble(index = date)
+
+
+# examine
+ecommerce |> head()
+
+
+# plot 
+autoplot(ecommerce) +
+    labs(title = "Electric Shopping & Mail Orders (E-commerce)",
+        subtitle = "Monthly U.S. retail sales data, 1992–2019, in Millions of USD",
+         y = "Sales ($ millions)",
+         x = "Date") 
+
+# examine STL decomposition
+ecommerce |>
+  model(stl = STL(value)) |>
+  components() |>
+  autoplot() +
+  labs(title = "E-commerce STL Decomposition", x="Date")
+
+```
+
+### Data Preprocessing
+
+```{r}
+
+# create training and validation splits
+ecommerce_train <- ecommerce |>
+filter_index(. ~ '2017 Sep')
+
+ecommerce_test <- ecommerce |>
+filter_index('2017 Oct' ~ '2019 Sep')
+
+
+```
+
+```{r}
+
+# determine if transformations are necessary
+ecommerce |>
+  mutate(log_value = log(value)) |> 
+  autoplot(log_value) +
+labs(title = "Electric Shopping & Mail Orders (E-commerce) Log transformed",
+         y = "Sales (log transformed)",
+         x = "Date") 
+
+# build a baseline model
+fit_baseline <- ecommerce_train |>
+model(
+auto_arima = ARIMA(value)
+)
+
+# plot residuals, acf, hist
+fit_baseline |>
+  select(auto_arima) |>
+  gg_tsresiduals(type = "innovation") +
+  labs(title = "Baseline ARIMA Residual Diagnostics (E-commerce)")
+
+
+# perform a ljung-box test =
+fit_baseline['auto_arima'] |>
+augment() |>
+features(.innov, c(ljung_box, box_pierce), lag = 24) |>
+select(.model, contains('pvalue'))
+
+```
+
+```{r}
+
+# examine stationarity and determine differences ON NON LOG Transformed data
+
+# no differencing
+ecommerce_train |>
+features(value, c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+
+# first test indicates no seasonal differencing and at least one regular difference
+
+#one regular difference
+ecommerce_train |>
+  features(value |> difference(), c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs), type = "tau")
+
+#test still indicates non-stationarity
+
+#two regular differences
+ecommerce_train |>
+  features(value |> difference() |> difference(), c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs), type = "tau")
+
+# data is stationary after two regular differences
+
+
+# plot differenced series and ACF/PACF plots
+ecommerce_train |>
+  gg_tsdisplay(value |> difference() |> difference(), plot_type = "partial", lag_max=24)
+
+```
+
+```{r}
+# examine stationarity and determine differences on LOG Transformed data
+ecommerce_train |>
+features(log(value), c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+
+#one regular difference
+ecommerce_train |>
+  features(log(value) |> difference(), c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs), type = "tau")
+
+# plot differenced series and ACF/PACF plots
+ecommerce_train |>
+  gg_tsdisplay(log(value) |> difference(), plot_type = "partial", lag_max = 24) +
+  labs(title = "E-commerce ACF/PACF Plots")
+
+
+```
+
+Using the log transformed data:
+
+ACF: q=1, Q=0 because one spike near lag zero reached significance. Zero spikes at lag 12, none
+after, zero seasonal spikes. (MA model)
+PCF: p=1, P=0 because one spike near lag zero reached significance. Zero spikes at lag 12, none
+after, zero seasonal spikes. (AR model)
+d=1, D=0 because one regular difference was implemented and zero seasonal differences.
+
+### Model Development and Forecasting
+
+```{r}
+# build models
+
+ecommerce_fit <- ecommerce_train |>
+  model(
+    auto_arima = ARIMA(value),
+    log_arima = ARIMA(log(value)),
+    ar_arima = ARIMA(log(value) ~ pdq(1,1,0) + PDQ(0,0,0)),
+    ma_arima = ARIMA(log(value) ~ pdq(0,1,1) + PDQ(0,0,0)),
+    ets = ETS(log(value)),
+    tslm = TSLM(log(value) ~ trend())
+  )
+
+report(ecommerce_fit['auto_arima'])
+report(ecommerce_fit['log_arima'])
+report(ecommerce_fit['ets'])
+
+#examine model metrics
+ecommerce_fit |>
+glance() |>
+arrange(AICc) |>
+select(.model, AICc, AIC, BIC) |>
+knitr::kable(digits = 1,
+             caption = "E-commerce Goodness of Fit Metrics (AICc)",
+             col.names = c("Model", "AICc", "AIC", "BIC"))
+
+
+accuracy(ecommerce_fit) |> 
+  arrange(RMSE) |>
+  select(.model, MAE, RMSE, MAPE, MPE) |>
+  knitr::kable(
+    digits = 1,
+    caption = "E-commerce Goodness of Fit Metrics (RMSE)",
+    col.names = c("Model", "MAE", "RMSE", "MAPE", "MPE")
+  )
+
+
+
+```
+
+```{r}
+# forecast the validation period
+ecommerce_fc <- forecast(ecommerce_fit, new_data = ecommerce_test)
+
+accuracy(ecommerce_fc, ecommerce_test) |>
+  arrange(RMSE) |>
+  select(.model, MAE, RMSE, MAPE, MPE) |>
+  knitr::kable(
+    digits = 1,
+    caption = "E-commerce Forecast Accuracy Metrics",
+    col.names = c("Model", "MAE", "RMSE", "MAPE", "MPE")
+  )
+
+#plot all the models  
+ecommerce_fc |>
+autoplot(
+data = ecommerce |> filter_index("2017 Jan" ~ .)) +
+facet_wrap(vars(.model), ncol=2) +
+labs(
+title = "E-commerce Sales: ETS vs ARIMA vs TSLM",
+y = "Sales ($ millions)",
+x = "Date")
+
+
+
+# Plot only the log_arima model
+ecommerce_fc |>
+  filter(.model == "log_arima") |>
+  autoplot(data = ecommerce |> filter_index("2017 Jan" ~ .)) +
+  labs(
+    title = "E-commerce Sales Forecast – ARIMA with Log Transformation",
+    y = "Sales ($ millions)",
+    x = "Date"
+  )
+
+# Plot only the auto ARIMA model
+ecommerce_fc |>
+  filter(.model == "auto_arima") |>
+  autoplot(data = ecommerce |> filter_index("2017 Jan" ~ .)) +
+  labs(
+    title = "E-commerce Sales Forecast – Baseline ARIMA",
+    y = "Sales ($ millions)",
+    x = "Date"
+  )
+
+
+# Plot only the ETS model
+ecommerce_fc |>
+  filter(.model == "ets") |>
+  autoplot(data = ecommerce |> filter_index("2017 Jan" ~ .)) +
+  labs(
+    title = "E-commerce Sales Forecast – ETS with Log Transformation",
+    y = "Sales ($ millions)",
+    x = "Date"
+  )
+
+# Plot only the TSLM model
+ecommerce_fc |>
+  filter(.model == "tslm") |>
+  autoplot(data = ecommerce |> filter_index("2017 Jan" ~ .)) +
+  labs(
+    title = "E-commerce Sales Forecast – TSLM with Log Transformation",
+    y = "Sales ($ millions)",
+    x = "Date"
+  )
+
+```
