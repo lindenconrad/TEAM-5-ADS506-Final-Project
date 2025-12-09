@@ -1,3 +1,10 @@
+---
+title: "ADS506ProjectCode"
+author: "Shrey Thaker"
+date: "2025-11-18"
+output: pdf_document
+---
+
 #EDA
 
 ```{r}
