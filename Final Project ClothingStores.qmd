@@ -103,11 +103,18 @@ acc_clothing
 clothing |>
   autoplot(Sales) +
   autolayer(fc_clothing |> filter(.model == "ETS_auto"),
-            level = NULL, alpha = 0.8) +
-  labs(title = "ETS Forecast – Clothing Store Sales",
-       y = "Sales (US$)",
-       x = "Year") +
-  guides(colour = "none")
+            level = c(80, 95),
+            alpha = 0.6, size = 0.9) +
+  labs(title = "Clothing Store Sales Forecast – ETS Model",
+       x = "Date",
+       y = "Sales (US$)") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.margin = margin(t = 25, r = 20, b = 10, l = 50),
+    plot.title.position = "panel",
+    legend.position = "right"
+  )
 ```
 
 
