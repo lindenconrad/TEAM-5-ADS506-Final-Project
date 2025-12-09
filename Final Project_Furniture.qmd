@@ -1,0 +1,341 @@
+---
+title: "Final Project - Furniture & Home Furnishings"
+author: "Linden Conrad"
+format: 
+    pdf:
+        geometry: "top=1in, bottom=1in, left=0.75in, right=0.75in"
+execute: 
+  cache: false
+---
+
+```{r}
+library(fpp3)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(tidyverse)
+```
+
+Load in the Data:
+
+```{r}
+# Load in Furniture & Home Furnishing Dataset 
+furn <- read.csv("/Users/lindenconrad/Desktop/USD/ADS506/Week 4/MRTSSM442USS.csv") |>
+  mutate(
+    date = as.Date(date),
+    value = as.numeric(value)
+  )
+```
+
+Examine Data Set:
+
+```{r}
+# Display timeseries
+furn |> head()
+
+# Check for missing or negative values
+cat("Missing values:", sum(is.na(furn$value)), "\n")
+cat("Negative values:", sum(furn$value < 0, na.rm = TRUE), "\n")
+```
+
+Pre-process Data Set:
+
+```{r}
+# Convert timeseries to montly tsibble 
+furn_ts <- furn |>
+  transmute(Month = yearmonth(date), Sales = value) |>
+  as_tsibble(index = Month)
+```
+
+Plot Time Series (Exploratory Data Analysis):
+
+```{r}
+# Plot Furniture Sales
+autoplot(furn_ts) +
+  labs(
+    title = "Furniture & Home Furnishings Store Sales (Monthly)",
+    subtitle = "Millions of U.S. dollars",
+    y = "Sales ($ millions)",
+    x = "Date"
+  )
+
+# Seasonal plot 
+gg_season(furn_ts, Sales) +
+  labs(
+    title = "Seasonal Plot: Monthly Furniture Sales",
+    x = "Month",
+    y = "Sales ($ millions)"
+  )
+
+# Subseries plot
+gg_subseries(furn_ts, Sales) +
+  labs(
+    title = "Monthly Subseries Plot: Furniture Sales",
+    x = "Month",
+    y = "Sales ($ millions)"
+  )
+```
+
+```{r}
+#STL Decomposition
+furn_ts |>
+  model(stl = STL(Sales)) |>
+  components() |>
+  autoplot() +
+  labs(
+    title = "Furniture Sales STL Decomposition",
+    x = "Date"
+  )
+```
+
+Training and Test Set Setup:
+
+```{r}
+# Test: All data up to Jan 2015
+furn_train <- furn_ts |>
+  filter(Month < yearmonth("2015 Jan"))
+
+# Test: All data after 2015
+furn_test <- furn_ts |>
+  filter(Month >= yearmonth("2015 Jan"))
+```
+
+See if a Log or Box-Cox Transformation is needed:
+
+```{r}
+# Log transform data
+furn_log <- furn_ts |>
+  mutate(log(Sales))
+
+# Plot transformed data
+autoplot(furn_log, log(Sales)) +
+  labs(title = "Furniture Store Sales (Log transformed)",
+    y = "Sales (log transformed)",
+    x = "Date"
+  )
+```
+
+```{r}
+# Guerrero's method
+lambda <- furn_ts |>
+  features(Sales, features = guerrero)
+
+lambda
+```
+
+```{r}
+# Box-Cox transform data
+furn_bc <- furn_ts |>
+  mutate(bc_Sales = box_cox(Sales, lambda = 0.5883682))
+
+# Plot transformed data
+autoplot(furn_bc, bc_Sales) +
+  labs(
+    title = "Furniture Store Sales (Box–Cox Transformed)",
+    y = "Sales (Box–Cox transformed)",
+    x = "Date"
+  )
+```
+
+Baseline Auto ARIMA:
+
+```{r}
+# see if box-cox or log is better
+furn_compare <- furn_train |>
+  model(
+    arima_log = ARIMA(log(Sales)),
+    arima_bc  = ARIMA(box_cox(Sales, lambda = 0.5883682))
+  )
+
+# comapre AICc
+furn_compare |>
+  glance() |>
+  select(.model, AICc, AIC, BIC)
+```
+
+Since the AIC for the log transformation is better, that is the transformation that should be used
+
+```{r}
+# Build a baseline model on the training data
+fit_baseline <- furn_train |>
+  model(auto_arima = ARIMA(log(Sales))
+  )
+
+# Show residual diagnostics
+gg_tsresiduals(fit_baseline) +
+  labs(title = "Baseline ARIMA Residual Diagnostics (Furniture)"
+  )
+```
+
+```{r}
+# Ljung-Box test
+fit_baseline |>
+  augment() |>
+  features(.innov, ljung_box, lag = 24, dof = 0)
+```
+
+Stationary and Differencing Checks:
+
+```{r}
+# No differencing
+furn_train |>
+  features(Sales, c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+```
+
+There looks to be one regular differences and no seasonal differences.
+
+```{r}
+# Difference once 
+furn_train |>
+  features(Sales |> difference(), 
+           c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+```
+
+Since ndiff is now 0 the series is stationary and we can move on and know we need to apply one regular differencing to the series.
+
+```{r}
+# difference time series
+furn_train_diff <- furn_train |>
+  mutate(diff_log_Sales = difference(log(Sales)))
+
+# ACF/PACF plots
+furn_train |>
+  gg_tsdisplay(log(Sales) |> difference(),
+               plot_type = "partial",
+               lag_max = 24)
+```
+
+```{r}
+# examine stationarity and determine differences on Log Transformed data
+furn_train |>
+  features(log(Sales), 
+           c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+```
+
+```{r}
+# one regular difference
+furn_train |>
+  features(log(Sales) |> difference(), 
+           c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+```
+
+Still needs one more regular differencing applied
+
+```{r}
+# two regular difference
+furn_train |>
+  features(log(Sales) |> difference() |> difference(), 
+           c(unitroot_kpss, unitroot_ndiffs, unitroot_nsdiffs))
+```
+
+Now the log transformed data is stationary
+
+```{r}
+# plot differenced series and ACF/PACF plots
+furn_train |>
+  gg_tsdisplay(log(Sales) |> difference(),
+               plot_type = "partial",
+               lag_max   = 24) +
+  labs(title = "Furniture Sales ACF/PACF Plots")
+```
+
+From the ACF:
+
+q = 1, Q = 0 because there is one clear significant spike at the first lag, and no meaningful spikes at lag 12 or other seasonal multiples. There are no seasonal autocorrelation spikes, indicating no MA seasonality.
+
+From the PCF:
+
+p = 1, P = 0 because there is one significant spike at lag 1 in the PACF, and no notable seasonal spikes at lag 12 or further. This suggests a non-seasonal AR(1) component and no seasonal AR terms.
+
+Because one regular difference was applied and seasonal differencing was not required, we set d = 1 and D = 0.
+
+Now we can use these values to build our models.
+
+Model Development and Forecasting:
+
+```{r}
+# build models 6 models
+furn_fit <- furn_train |>
+  model(
+    auto_arima = ARIMA(Sales),
+    log_arima  = ARIMA(log(Sales)),
+    ar_arima = ARIMA(log(Sales) ~ pdq(1,1,0) + PDQ(0,0,0)),
+    ma_arima = ARIMA(log(Sales) ~ pdq(0,1,1) + PDQ(0,0,0)),
+    ets  = ETS(log(Sales)),
+    tslm = TSLM(log(Sales) ~ trend())
+  )
+
+# view auto_arima model
+report(furn_fit['auto_arima'])
+
+# view log_arima model
+report(furn_fit['log_arima'])
+
+# view ar_arima model
+report(furn_fit['ar_arima'])
+
+# view ma_arima model
+report(furn_fit['ma_arima'])
+
+# view ets model
+report(furn_fit['ets'])
+
+# view tslm model
+report(furn_fit['tslm'])
+```
+
+Evaluate
+
+```{r}
+# Examine model metrics
+furn_fit |>
+  glance() |>
+  arrange(AICc) |>
+  select(.model, AICc, AIC, BIC) |>
+  knitr::kable(
+    digits = 1,
+    caption = "Furniture Sales Goodness of Fit Metrics (AICc)",
+    col.names = c("Model", "AICc", "AIC", "BIC")
+  )
+```
+
+```{r}
+# Print RMSE chart
+accuracy(furn_fit) |>
+  arrange(RMSE) |>
+  select(.model, MAE, RMSE, MAPE, MPE) |>
+  knitr::kable(
+    digits = 1,
+    caption = "Furniture Sales Goodness of Fit Metrics (RMSE)",
+    col.names = c("Model", "MAE", "RMSE", "MAPE", "MPE")
+  )
+```
+
+```{r}
+# forecast the validation period
+furn_fc <- forecast(furn_fit, new_data = furn_test)
+
+# accuracy chart
+accuracy(furn_fc, furn_test) |>
+  arrange(RMSE) |>
+  select(.model, MAE, RMSE, MAPE, MPE) |>
+  knitr::kable(
+    digits   = 1,
+    caption  = "Furniture Sales Forecast Accuracy Metrics",
+    col.names = c("Model", "MAE", "RMSE", "MAPE", "MPE")
+  )
+```
+
+```{r}
+# plot models
+furn_fc |>
+  autoplot(
+    data = furn_train
+  ) +
+  facet_wrap(vars(.model), ncol = 2) +
+  labs(
+    title = "Furniture Sales: ETS vs ARIMA vs TSLM",
+    y = "Sales ($ millions)",
+    x = "Date"
+  )
+```
