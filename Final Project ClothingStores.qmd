@@ -1,1 +1,106 @@
+#EDA
+
+```{r}
+library(tidyverse)
+library(tsibble)
+library(lubridate)
+library(fabletools)
+library(feasts)
+library(fpp3)
+
+csv_path <- "C:/Users/shrey/Downloads/MRTSSM4481USN.csv"
+
+clothing <- read_csv(csv_path, show_col_types = FALSE) |>
+  select(date, Sales = value) |>
+  mutate(Month = yearmonth(date)) |>
+  as_tsibble(index = Month)
+```
+
+```{r}
+clothing |> 
+  summarise(
+    Start = min(Month),
+    End = max(Month),
+    Min_Sales = min(Sales),
+    Max_Sales = max(Sales),
+    N = n()
+  )
+```
+
+```{r}
+autoplot(clothing, Sales) +
+  labs(title = "Clothing Stores (MRTSSM4481USN) – Monthly Retail Sales",
+       y = "Sales (US$)",
+       x = "Year")
+```
+
+```{r}
+clothing |>
+  model(STL(Sales ~ trend() + season())) |>
+  components() |>
+  autoplot() +
+  labs(title = "STL Decomposition – Clothing Store Sales")
+```
+
+```{r}
+# Missing values
+sum(is.na(clothing$Sales))
+
+# Negative values
+sum(clothing$Sales < 0)
+```
+
+#Model Development/Forecasting
+```{r}
+library(fpp3)
+csv_path <- "C:/Users/shrey/Downloads/MRTSSM4481USN.csv"
+
+clothing <- read_csv(csv_path, show_col_types = FALSE) |>
+  select(date, Sales = value) |>
+  mutate(Month = yearmonth(date)) |>
+  as_tsibble(index = Month)
+
+clothing |>
+  gg_season(Sales, period = "year") +
+  labs(title = "Seasonal Plot – Clothing Store Sales",
+       y = "Sales (US$)")
+```
+
+```{r}
+H <- 24
+N <- nrow(clothing)
+
+clothing_train <- clothing |> slice_head(n = N - H)
+clothing_test  <- clothing |> slice_tail(n = H)
+```
+
+```{r}
+fits_clothing <- clothing_train |>
+  model(
+    ETS_auto = ETS(Sales),
+    TSLM_lin = TSLM(Sales ~ trend() + season())
+  )
+
+fc_clothing <- fits_clothing |>
+  forecast(h = H)
+
+acc_clothing <- fc_clothing |>
+  accuracy(clothing_test) |>
+  filter(.type == "Test") |>
+  arrange(RMSE)
+
+acc_clothing
+```
+
+```{r}
+clothing |>
+  autoplot(Sales) +
+  autolayer(fc_clothing |> filter(.model == "ETS_auto"),
+            level = NULL, alpha = 0.8) +
+  labs(title = "ETS Forecast – Clothing Store Sales",
+       y = "Sales (US$)",
+       x = "Year") +
+  guides(colour = "none")
+```
+
 
