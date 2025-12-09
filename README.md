@@ -21,12 +21,6 @@ TSLM (Time Series Linear Model)<br>
 
 Results show that no single model performs best across all categories. Instead, each retail sector displays unique behavior requiring a category-specific forecasting strategy.
 
-Clothing → strong seasonality → ETS performs best<br>
-E-commerce → rapid growth trend → ARIMA performs best<br>
-Furniture → steady linear growth w/ seasonal peaks → TSLM performs best<br>
-
-These findings highlight the importance of tailored forecasting for inventory planning, budgeting, and retail strategy.
-
 #### Project Objectives
 1. Explore and visualize long-term retail sales behavior.
 2. Determine whether series exhibit trend, seasonality, or structural changes.
