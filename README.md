@@ -13,11 +13,7 @@ Linden Conrad-Marut, Stephanie Smith, Shrey Thaker
 ### Project Summary
 This project analyzes three major U.S. retail sales categories using monthly time-series data from the U.S. Census Bureau/FRED (1992–2019):
 Clothing Stores, Furniture & Home Furnishings, and Electronic Shopping & Mail-Order (E-Commerce).
-Our goal was to uncover long-term trends and seasonal patterns, then compare forecasting approaches to determine which model best fits each retail category. We implemented and evaluated three forecasting methods:
-
-ARIMA (AutoRegressive Integrated Moving Average)<br>
-ETS (Error-Trend-Seasonality / Exponential Smoothing)<br>
-TSLM (Time Series Linear Model)<br>
+Our goal was to uncover long-term trends and seasonal patterns, then compare forecasting approaches to determine which model best fits each retail category.
 
 Results show that no single model performs best across all categories. Instead, each retail sector displays unique behavior requiring a category-specific forecasting strategy.
 
